@@ -1,4 +1,3 @@
-import Ratelimiter from "./Ratelimiter";
 import RequestHandler from "./RequestHandler";
 import ChannelMethods from "./methods/Channels";
 import UserMethods from "./methods/Users";
@@ -34,7 +33,6 @@ class SnowTransfer {
 	public bot: BotMethods;
 	public auditLog: AuditLogMethods;
 	public stageInstance: StageInstanceMethods;
-	public ratelimiter: Ratelimiter;
 
 	/**
 	 * Create a new Rest Client
@@ -47,8 +45,7 @@ class SnowTransfer {
 		this.options = { baseHost: Endpoints.BASE_HOST, disableEveryone: false, sentryOptions: { extra: { snowtransferVersion: version } }, useRedis: false };
 		this.token = token;
 		Object.assign(this.options, options);
-		this.ratelimiter = new Ratelimiter();
-		this.requestHandler = new RequestHandler(this.ratelimiter, { token: this.token, baseHost: this.options.baseHost || Endpoints.BASE_HOST });
+		this.requestHandler = new RequestHandler({ token: this.token, baseHost: this.options.baseHost || Endpoints.BASE_HOST });
 		this.channel = new ChannelMethods(this.requestHandler, this.options.disableEveryone);
 		this.user = new UserMethods(this.requestHandler);
 		this.guildAssets = new GuildAssetsMethods(this.requestHandler);

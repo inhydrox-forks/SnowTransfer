@@ -73,7 +73,6 @@ interface RequestHandler {
  * Request Handler class
  */
 class RequestHandler extends EventEmitter {
-	public ratelimiter: import("./Ratelimiter");
 	public options: { baseHost: string; baseURL: string; headers: { Authorization?: string; "User-Agent": string; } };
 	public latency: number;
 	public apiURL: string;
@@ -84,10 +83,9 @@ class RequestHandler extends EventEmitter {
 	 * @param ratelimiter ratelimiter to use for ratelimiting requests
 	 * @param options options
 	 */
-	public constructor(ratelimiter: import("./Ratelimiter"), options: { token?: string; baseHost: string; }) {
+	public constructor(options: { token?: string; baseHost: string; }) {
 		super();
 
-		this.ratelimiter = ratelimiter;
 		this.options = {
 			baseHost: Endpoints.BASE_HOST,
 			baseURL: Endpoints.BASE_URL,
@@ -115,72 +113,47 @@ class RequestHandler extends EventEmitter {
 		if (typeof data === "number") data = String(data);
 		const stack = new Error().stack;
 		return new Promise(async (res, rej) => {
-			this.ratelimiter.queue(async (bkt) => {
-				const reqID = crypto.randomBytes(20).toString("hex");
-				try {
-					this.emit("request", reqID, { endpoint, method, dataType, data });
+			const reqID = crypto.randomBytes(20).toString("hex");
+			try {
+				this.emit("request", reqID, { endpoint, method, dataType, data });
 
-					let request: import("centra").Response;
-					if (dataType == "json") request = await this._request(endpoint, method, data, (method === "get" || endpoint.includes("/bans") || endpoint.includes("/prune")), amount);
-					else if (dataType == "multipart") request = await this._multiPartRequest(endpoint, method, data, amount);
-					else {
-						const e = new Error("Forbidden dataType. Use json or multipart");
-						e.stack = stack;
-						throw e;
-					}
-
-					// 429 and 502 are recoverable and will be re-tried automatically with 3 attempts max.
-					if (request.statusCode && !Constants.OK_STATUS_CODES.includes(request.statusCode) && ![429, 502].includes(request.statusCode)) {
-						const e = new DiscordAPIError(endpoint, request.headers["content-type"]?.startsWith("application/json") ? await request.json() : request.body.toString(), method, request.statusCode);
-						e.stack = stack;
-						throw e;
-					}
-
-					if (request.statusCode && [429, 502].includes(request.statusCode)) {
-						if (request.statusCode === 429) {
-							this._applyRatelimitHeaders(bkt, request.headers);
-							this.emit("rateLimit", { timeout: bkt.reset, limit: bkt.limit, method: method, path: endpoint, route: this.ratelimiter.routify(endpoint, method) });
-						}
-						return this.request(endpoint, method, dataType, data, amount++);
-					}
-
-					this.emit("done", reqID, request);
-					if (request.body) {
-						let b: any;
-						try {
-							b = JSON.parse(request.body.toString());
-						} catch {
-							res(undefined);
-						}
-						return res(b);
-					} else return res(undefined);
-				} catch (error) {
-					if (error && error.stack) error.stack = stack;
-					this.emit("requestError", reqID, error);
-					return rej(error);
+				let request: import("centra").Response;
+				if (dataType == "json") request = await this._request(endpoint, method, data, (method === "get" || endpoint.includes("/bans") || endpoint.includes("/prune")), amount);
+				else if (dataType == "multipart") request = await this._multiPartRequest(endpoint, method, data, amount);
+				else {
+					const e = new Error("Forbidden dataType. Use json or multipart");
+					e.stack = stack;
+					throw e;
 				}
-			}, endpoint, method);
+
+				// 429 and 502 are recoverable and will be re-tried automatically with 3 attempts max.
+				if (request.statusCode && !Constants.OK_STATUS_CODES.includes(request.statusCode) && ![429, 502].includes(request.statusCode)) {
+					const e = new DiscordAPIError(endpoint, request.headers["content-type"]?.startsWith("application/json") ? await request.json() : request.body.toString(), method, request.statusCode);
+					e.stack = stack;
+					throw e;
+				}
+
+				if (request.statusCode && [429, 502].includes(request.statusCode)) {
+					return this.request(endpoint, method, dataType, data, amount++);
+				}
+
+				this.emit("done", reqID, request);
+				if (request.body) {
+					let b: any;
+					try {
+						b = JSON.parse(request.body.toString());
+					} catch {
+						res(undefined);
+					}
+					return res(b);
+				} else return res(undefined);
+			} catch (error) {
+				if (error && error.stack) error.stack = stack;
+				this.emit("requestError", reqID, error);
+				return rej(error);
+			}
 		});
 	}
-
-	/**
-	 * Apply the received ratelimit headers to the ratelimit bucket
-	 * @param bkt Ratelimit bucket to apply the headers to
-	 * @param headers Http headers received from discord
-	 */
-	private _applyRatelimitHeaders(bkt: import("./ratelimitBuckets/LocalBucket"), headers: any) {
-		if (headers["x-ratelimit-global"]) {
-			bkt.ratelimiter.global = true;
-			bkt.ratelimiter.globalResetAt = Date.now() + (parseFloat(headers["retry-after"]) * 1000);
-		}
-		if (headers["x-ratelimit-remaining"]) {
-			bkt.remaining = parseInt(headers["x-ratelimit-remaining"]);
-			if (bkt.remaining === 0) bkt.resetAt = Date.now() + bkt.reset;
-		} else bkt.remaining = 1;
-		if (headers["x-ratelimit-limit"]) bkt.limit = parseInt(headers["x-ratelimit-limit"]);
-		if (headers["retry-after"] && !headers["x-ratelimit-global"]) bkt.resetAt = Date.now() + (parseInt(headers["retry-after"]) * 1000); // The ms precision is not strictly necessary. It always rounds up, which is safe.
-	}
-
 	/**
 	 * Execute a normal json request
 	 * @param endpoint Endpoint to use

@@ -21,7 +21,7 @@
 		"strictBindCallApply": true,
 		"strictNullChecks": true,
 		"target": "ES2019",
-		"types": ["node"]
+		"typeRoots": ["node_modules/@types"]
 	},
 	"include": ["./src"]
 }
